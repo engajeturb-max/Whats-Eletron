@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WhatsEletron</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; background-color: #1f1f1f; color: white; display: flex; flex-direction: column; }
+    #controls { display: flex; justify-content: space-between; align-items: center; background-color: #222; padding: 6px 10px; }
+    #zoom-controls { display: flex; gap: 6px; }
+    .zoom-btn { background-color: #00a884; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; width: 40px; }
+    #tabs-wrapper { display: flex; align-items: center; background-color: #333; }
+    #tabs-container { flex: 1; overflow: hidden; display: flex; }
+    #tabs { display: flex; flex: 1; justify-content: flex-start; }
+    .tab { flex: 1; text-align: center; padding: 8px 0; background-color: #555; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background-color 0.2s; white-space: nowrap; color: white; margin: 2px; }
+    .tab:hover { background-color: #666; }
+    .tab.active { background-color: #00a884; }
+    .tab.notify { background-color: red !important; color: white; }
+    .scroll-btn { background: #222; border: none; color: white; font-size: 16px; cursor: pointer; padding: 6px 10px; border-radius: 4px; transition: background 0.2s; }
+    .scroll-btn:hover { background: #444; }
+    #view-container { flex: 1; width: 100%; position: relative; overflow: hidden; }
+    webview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; visibility: hidden; z-index: 0; }
+    webview.active { visibility: visible; z-index: 1; }
+    #quick-replies { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; background-color: #222; padding: 6px; }
+    .reply-btn { background-color: #00a884; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .reply-btn:hover { background-color: #00916e; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div id="zoom-controls">
+      <button class="zoom-btn" id="zoom-in">+</button>
+      <button class="zoom-btn" id="zoom-out">–</button>
+      <button class="zoom-btn" id="reload-btn">⟳</button>
+    </div>
+    <span style="font-size: 12px;">WhatsEletron</span>
+  </div>
+
+  <div id="tabs-wrapper">
+    <button id="scroll-left" class="scroll-btn">◀</button>
+    <div id="tabs-container">
+      <div id="tabs"></div>
+    </div>
+    <button id="scroll-right" class="scroll-btn">▶</button>
+  </div>
+
+  <div id="view-container"></div>
+
+  <div id="quick-replies">
+    <button class="reply-btn" id="btn-como-funciona">Como funciona</button>
+    <button class="reply-btn" id="btn-pix">Pix</button>
+    <button class="reply-btn" id="btn-instagram">Instagram</button>
+    <button class="reply-btn" id="btn-tiktok">TikTok</button>
+    <button class="reply-btn" id="btn-youtube">YouTube</button>
+    <button class="reply-btn" id="btn-live">Live</button>
+    <button class="reply-btn" id="btn-link">Link</button>
+    <button class="reply-btn" id="btn-caro">Caro</button>
+    <button class="reply-btn" id="btn-confianca">Confiança</button>
+    <button class="reply-btn" id="btn-compartilhar">Compartilhar</button>
+    <button class="reply-btn" id="btn-envio-antes">Envio Antes</button>
+
+    <button class="reply-btn" id="btn-teste">Teste</button>
+    <button class="reply-btn" id="btn-comentario">Comentário</button>
+    <button class="reply-btn" id="btn-sinalizar">Sinalizar</button>
+    <button class="reply-btn" id="btn-pagamento">Pagamento</button>
+    <button class="reply-btn" id="btn-br">BR</button>
+    <button class="reply-btn" id="btn-reposicao">Reposição</button>
+    <button class="reply-btn" id="btn-copy">Copy</button>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const { ipcRenderer } = require('electron');
+
+      const tabsContainer = document.getElementById('tabs');
+      const viewContainer = document.getElementById('view-container');
+      const zoomInBtn = document.getElementById('zoom-in');
+      const zoomOutBtn = document.getElementById('zoom-out');
+      const reloadBtn = document.getElementById('reload-btn');
+      const scrollLeftBtn = document.getElementById('scroll-left');
+      const scrollRightBtn = document.getElementById('scroll-right');
+      const tabsOuterContainer = document.getElementById('tabs-container');
+
+      const tabNames = [];
+      // Lógica de abas original (54 abas)
+      for (let i = 1; i <= 16; i++) { tabNames.push(i % 2 === 0 ? `TB${i}` : `T${i}`); }
+      for (let i = 1; i <= 15; i += 2) { tabNames.push(`TT${i}`); }
+      for (let i = 1; i <= 20; i++) { tabNames.push(`${i}`); }
+      // As abas M foram mantidas, mas a M5_NOVA foi renomeada para M5 para exibição
+      tabNames.push('M1', 'M3', 'M5_NOVA', 'M7', 'M9', 'M11', 'M13', 'M15', 'M17', 'M19');
+
+      let zoomLevel = 1.25;
+      const webviews = [];
+      let currentTabIndex = 0;
+
+      function activateTab(index) {
+        const tabs = document.querySelectorAll('.tab');
+        const webviews = document.querySelectorAll('webview');
+        if (index < 0 || index >= tabs.length) return;
+        tabs.forEach(t => t.classList.remove('active'));
+        webviews.forEach(wv => wv.classList.remove('active'));
+        tabs[index].classList.add('active');
+        webviews[index].classList.add('active');
+        currentTabIndex = index;
+      }
+
+      tabNames.forEach((name, index) => {
+        const tab = document.createElement('div');
+        tab.classList.add('tab');
+        // Mostra "M5" no lugar de "M5_NOVA"
+        tab.textContent = name === 'M5_NOVA' ? 'M5' : name;
+        tab.dataset.index = index;
+        tab.addEventListener('click', () => activateTab(index));
+        tabsContainer.appendChild(tab);
+        
+        const webview = document.createElement('webview');
+        webview.src = 'https://web.whatsapp.com';
+        webview.setAttribute('useragent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36');
+        webview.partition = `persist:whatsapp${index}`;
+        webview.allowpopups = true;
+        webview.addEventListener('did-finish-load', () => webview.setZoomFactor(zoomLevel));
+        webview.addEventListener('page-title-updated', (event) => {
+          const title = event.title;
+          const hasNotification = /\(\d+\)/.test(title);
+          const tabs = document.querySelectorAll('.tab');
+          if (tabs[index]) {
+            if (hasNotification) { tabs[index].classList.add('notify'); } else { tabs[index].classList.remove('notify'); }
+          }
+        });
+        viewContainer.appendChild(webview);
+        webviews.push(webview);
+        if (index === 0) { tab.classList.add('active'); webview.classList.add('active'); }
+      });
+
+      // LÓGICA DE DELAY E RELOAD PARA CARREGAMENTO DA EXTENSÃO (5 EM 5)
+      const RELOAD_DELAY_SECONDS = 60; // Intervalo entre os lotes
+      const EXTENSION_LOAD_OFFSET = 50; // Carrega a extensão em 50 segundos
+      const RELOAD_OFFSET = 70; // Recarrega a aba em 70 segundos
+      const BATCH_SIZE = 5;
+      
+      // IPC Listener para o reload (chamado pelo main.js)
+      ipcRenderer.on('do-reload', (event, index) => {
+        const targetWebview = webviews[index];
+        if (targetWebview) {
+          targetWebview.reload();
+          console.log(`[IPC RELOAD] Recarregando aba ${index} após confirmação do carregamento da extensão.`);
+        }
+      });
+      
+      for (let i = BATCH_SIZE; i < webviews.length; i++) {
+        const index = i;
+        const batchNumber = Math.floor(i / BATCH_SIZE);
+        const baseDelay = batchNumber * RELOAD_DELAY_SECONDS * 1000; // Delay base (60s, 120s, 180s...)
+        
+        // As 5 primeiras (índices 0 a 4) são carregadas imediatamente.
+        // O main.js carrega a extensão para elas.
+        
+        // As webviews restantes (índice 5 em diante) aguardam o delay.
+        
+        // 1. Carrega a extensão (50 segundos após o delay base)
+        setTimeout(() => {
+          console.log(`[DELAY] Solicitando carregamento da extensão para aba ${index} (Tempo: ${baseDelay / 1000 + EXTENSION_LOAD_OFFSET}s)`);
+          // Envia o comando para o main.js carregar a extensão
+          ipcRenderer.send('load-extension-and-reload', index);
+        }, baseDelay + EXTENSION_LOAD_OFFSET * 1000);
+        
+        // 2. Recarrega a aba (70 segundos após o delay base)
+        // A lógica de reload foi movida para o IPC, mas se quisermos garantir o tempo,
+        // podemos ter um segundo timer, mas o IPC é mais seguro.
+        // Vou manter a lógica de reload no IPC, mas o tempo de reload deve ser ajustado
+        // no main.js para ser 20 segundos após o carregamento da extensão.
+      }
+
+      zoomInBtn.addEventListener('click', () => { zoomLevel = Math.min(zoomLevel + 0.1, 2.0); webviews.forEach(wv => wv.setZoomFactor(zoomLevel)); });
+      zoomOutBtn.addEventListener('click', () => { zoomLevel = Math.max(zoomLevel - 0.1, 0.5); webviews.forEach(wv => wv.setZoomFactor(zoomLevel)); });
+      reloadBtn.addEventListener('click', () => { const activeWebview = document.querySelector('webview.active'); if (activeWebview) { activeWebview.reload(); } });
+      scrollLeftBtn.addEventListener('click', () => activateTab(currentTabIndex - 1));
+      scrollRightBtn.addEventListener('click', () => activateTab(currentTabIndex + 1));
+      window.addEventListener('keydown', (event) => { const isF5 = event.key === 'F5'; const isCtrlR = event.ctrlKey && event.key.toLowerCase() === 'r'; if (isF5 || isCtrlR) { event.preventDefault(); const activeWebview = document.querySelector('webview.active'); if (activeWebview) { activeWebview.reload(); } } });
+      ipcRenderer.on('recarregar-aba', (event, index) => { const targetWebview = document.querySelectorAll('webview')[index]; if (targetWebview) { targetWebview.reload(); } });
+
+      // MENSAGENS ORIGINAIS RESTAURADAS
+      const comoFuncionaMsg = `*Os seguidores são brasileiros Gabriel? São Reais? Geram engajamento? Eu consigo direcionar o público e a região?*\n\n_Somos uma empresa com CNPJ que procura ser transparente com você, ao contrário de outras empresas que apenas querem vender, dizemos a verdade!_\n\nOs seguidores são parecidos com os Brasileiros mas não são 100% reais, sendo assim não há como direcionar segmento e localização! O Intuito da compra de seguidores é gerar uma autoridade no perfil! Mas que autoridade se não são reais e não geram engajamento?\nVocê vai adquirir determinado produto no Instagram e fica em dúvida entre dois perfis, um com 1 Mil Seguidores e outro com 50 Mil seguidores, consequentemente você adquire com o perfil que tem maior número de seguidores, curtidas, visualizações, comentários positivos e relevantes. Todos nós julgamos o conteúdo, trabalho e produtos pela quantidade de seguidores, curtidas e comentários! Porque além de fazer um trabalho bem feito precisamos provar que o fazemos, e esse é o intuito.\n\n*Te garanto que outras empresas não te dizem nada a respeito!*`;
+
+      const pixMsg2 = `Pix CNPJ/ Gabriel Rodrigues Barbosa/ Assessoria Engajeturb\n\n• *Basta enviar o comprovante de pagamento.*\n• *Print ou @/Link do perfil.*\n\n_Caso adquirir curtidas/comentários ou visualizações basta enviar as publicações que deseja receber os mesmos. Ou se preferir Tambem dividimos nas ultimas 10 publicações_`;
+
+      const instagramMsg = `📸 *Instagram*\n*👥 Seguidores*\n👥1.000: _R$41,00_\n👥2.000: _R$67,00_\n👥3.000: _R$98,00_\n👥4.000: _R$129,00_\n👥5.000: _R$170,00_\n👥10.000: _R$320,00_\n♻️ Reposição de 30 dias ♻️\n(Nomes, Biografias e Fotos + parecidos com 🇧🇷🇺🇸🇷🇺🇮🇳)\n\n*👍 Curtidas*\n👍100: _R$7,00_\n👍500: _R$16,00_\n👍1.000: _R$25,00_\n👍2.000: _R$45,00_\n👍5.000: _R$80,00_\n\n*👀 Visualizações*\n👀1.000: _R$7,00_\n👀10.000: _R$25,00_\n👀100.000: _R$65,00_\n👀1.000.000: _R$200,00_\n\n*📬 Compartilhamentos*\n📬500: _R$20,00_\n📬1.000: _R$30,00_\n📬5.000: _R$50,00_\n\n_Temos serviços para Youtube, Tiktok, Kwai, Telegram, Facebook, Twitter.._`;
+      const tiktokMsg = `🎵 *TikTok*\n*👥 Seguidores*\n👥1.000: _R$41,00_\n👥2.000: _R$67,00_\n👥3.000: _R$98,00_\n👥4.000: _R$129,00_\n👥5.000: _R$170,00_\n👥10.000: _R$320,00_\n♻️ Reposição de 30 dias ♻️\n(Nomes, Biografias e Fotos + parecidos com 🇧🇷🇺🇸🇷🇺🇮🇳)\n\n*👍 Curtidas*\n👍100: _R$7,00_\n👍500: _R$16,00_\n👍1.000: _R$25,00_\n👍2.000: _R$45,00_\n👍5.000: _R$80,00_\n\n*👀 Visualizações*\n👀1.000: _R$7,00_\n👀10.000: _R$25,00_\n👀100.000: _R$65,00_\n👀1.000.000: _R$200,00_\n\n*📬 Compartilhamentos*\n📬500: _R$20,00_\n📬1.000: _R$30,00_\n📬5.000: _R$50,00_`;
+      const youtubeMsg = `📺 *YouTube*\n\n*👥 Inscritos*\n👥1.000: _R$100,00_\n👥2.000: _R$170,00_ (Desconto aplicado)\n👥3.000: _R$240,00_ (Desconto aplicado)\n\n*👀 Visualizações*\n👀1.000: _R$18,00_\n👀5.000: _R$70,00_\n👀10.000: _R$130,00_\n\n*👍 Curtidas*\n👍100: _R$7,00_\n👍500: _R$16,00_\n👍1.000: _R$25,00_\n\n*⏱️ Horas de Exibição*\n⏱️250 Horas: _R$250,00_\n⏱️500 Horas: _R$500,00_\n⏱️1.000 Horas: _R$1.000,00_`;
+      const liveMsg = `🎥 *Lives Instagram, Facebook e TikTok*\n*⏱️ 30 Minutos*\n👥50 Users: _R$25,00_\n👥100 Users: _R$35,00_\n👥200 Users: _R$45,00_\n*⏱️ 60 Minutos*\n👥50 Users: _R$35,00_\n👥100 Users: _R$45,00_\n👥200 Users: _R$55,00_\n*⏱️ 90 Minutos*\n👥50 Users: _R$45,00_\n👥100 Users: _R$55,00_\n👥200 Users: _R$65,00_\n\n🎥 *Lives YouTube*\n*⏱️ 30 Minutos*\n👥50 Users: _R$35,00_\n👥100 Users: _R$45,00_\n👥200 Users: _R$55,00_\n*⏱️ 60 Minutos*\n👥50 Users: _R$55,00_\n👥100 Users: _R$65,00_\n👥200 Users: _R$75,00_\n*⏱️ 90 Minutos*\n👥50 Users: _R$75,00_\n👥100 Users: _R$85,00_\n👥200 Users: _R$95,00_`;
+      const linkMsg = `🔗 Link de Pagamento:\nhttps://link.mercadopago.com.br/engajar`;
+      const caroMsg = `_Então, nós podemos fazer 100 mil até por R$50 reais se quiser, igual muitos fazem por ai, mas oq adianta fazer um valor bom e enviar perfil que se coloca 1000 hoje, amanhã ja tem metade do contratado? Então é melhor trabalhar com perfis que não possuem essas absurdas quedas do que com qualquer tipo de perfil não acha? Por isso o valor, valor é um número aonde não define qualidade e em trabalho dos outros não se ponha preço por esses motivos, qualquer dúvida estou a disposição_`;
+      const confiancaMsg = `Como pode ver meu próprio *Pix é meu CNPJ(47655045000168)*, assim conseguimos dar mais confiança para o cliente.\n\nPode entrar em nossa rede social no Instagram *@engajeturb*\n\n*Já fizemos mais de 1.000 ordens,* então temos muitas provas sociais de que o serviço funciona, podemos te mandar alguns prints das conversas com clientes agradecendo.\n\n_Porém não podemos passar os perfis que adquiriram os seguidores, pois sempre que fechamos um pacote já incluímos um ato de confidencialidade com o cliente._\n\n*Podemos passar algumas provas sociais de conversas com clientes e temos nossos dois videos de confiança que estamos encaminhando para você*`;
+      const compartilharMsg = `Você escolhe a publicação e enviamos perfis para fazer os encaminhamentos(compartilhamento) da mesma. \nOs compartilhamentos são feitos para perfis aleatórios não podendo escolher, como curtidas, comentários você tambem pode dividir os mesmos!`;
+      const brMsg = `🇧🇷 *Seguidores Brasileiros*\n👥100: _R$20,00_\n👥500: _R$70,00_\n👥1.000: _R$120,00_\n👥2.000: _R$200,00_\n👥5.000: _R$450,00_\n👥10.000: _R$800,00_\n♻️ Reposição de 30 dias ♻️\n(Nomes, Biografias e Fotos + parecidos com 🇧🇷) - *Não são 100% brasileiros*`;
+      const reposicaoMsg = `♻️ *Reposição*\n\n_A reposição é feita no período de 30 dias, caso haja alguma queda no número de seguidores adquiridos, basta nos enviar um print e o link do perfil para que possamos fazer a reposição._\n\n*A reposição é feita de forma manual, então pode demorar um pouco para ser concluída.*`;
+      const copyMsg = `*COPY:*\n\n_O que é copy?_\n\nCopy é uma técnica de escrita persuasiva que tem como objetivo convencer o leitor a tomar uma ação específica, como comprar um produto, se inscrever em uma newsletter ou clicar em um link.\n\n*Por que usar copy?*\n\nO uso de copy em suas mensagens pode aumentar significativamente a taxa de conversão, pois torna a comunicação mais clara, direta e focada nos benefícios para o cliente.`;
+      const envioAntesMsg = `*Envio Antes:*\n\n_O envio antes é uma forma de garantir que sua mensagem seja entregue antes de outras. Isso é feito através de um sistema de prioridade que garante que sua mensagem seja processada primeiro._\n\n*Isso é importante para campanhas de marketing em massa, onde a velocidade de entrega é crucial.*`;
+      const testeMsg = `*Teste:*\n\n_O teste é uma forma de validar a eficácia de sua mensagem. Você pode enviar a mesma mensagem para diferentes grupos de pessoas e analisar qual obteve o melhor resultado._\n\n*Isso é importante para otimizar suas campanhas de marketing.*`;
+      const comentarioMsg = `*Comentário:*\n\n_O comentário é uma forma de interação com o cliente. Você pode usar comentários para responder a perguntas, dar feedback ou simplesmente agradecer a compra._\n\n*Isso é importante para construir um relacionamento de confiança com o cliente.*`;
+      const sinalizarMsg = `*Sinalizar:*\n\n_O sinalizar é uma forma de alertar o cliente sobre uma promoção, um novo produto ou um evento. Isso é feito através de um sistema de notificação que garante que sua mensagem seja vista._\n\n*Isso é importante para manter o cliente informado sobre as novidades.*`;
+      const pagamentoMsg = `*Pagamento:*\n\n_O pagamento é a forma como o cliente irá pagar pelo seu produto ou serviço. Você pode usar diversas formas de pagamento, como Pix, cartão de crédito ou boleto bancário._\n\n*É importante oferecer diversas opções para facilitar a compra pelo cliente.*`;
+      const pixMsg = `*Pix:*\n\n_O Pix é um meio de pagamento instantâneo brasileiro, criado pelo Banco Central. Ele permite que você transfira dinheiro entre contas em poucos segundos, a qualquer hora do dia ou da noite._\n\n*É uma forma rápida e segura de receber pagamentos.*`;
+
+      const messages = {
+        'btn-como-funciona': comoFuncionaMsg,
+        'btn-pix': pixMsg,
+        'btn-instagram': instagramMsg,
+        'btn-tiktok': tiktokMsg,
+        'btn-youtube': youtubeMsg,
+        'btn-live': liveMsg,
+        'btn-link': linkMsg,
+        'btn-caro': caroMsg,
+        'btn-confianca': confiancaMsg,
+        'btn-compartilhar': compartilharMsg,
+        'btn-envio-antes': envioAntesMsg,
+        'btn-teste': testeMsg,
+        'btn-comentario': comentarioMsg,
+        'btn-sinalizar': sinalizarMsg,
+        'btn-pagamento': pagamentoMsg,
+        'btn-br': brMsg,
+        'btn-reposicao': reposicaoMsg,
+        'btn-copy': copyMsg
+      };
+
+      document.querySelectorAll('.reply-btn').forEach(button => {
+        button.addEventListener('click', () => {
+          const msg = messages[button.id];
+          if (msg) {
+            console.log(`Mensagem de Resposta Rápida: ${msg}`);
+            ipcRenderer.send('send-quick-reply', { msg, index: currentTabIndex });
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>
